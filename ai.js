@@ -62,9 +62,6 @@ export class AI extends Board {
 
             this.isExecutingPlan = true;
             this.executeNextStep(); // Ejecutar el primer paso inmediatamente.
-        } else {
-            // 3. Si no hay ninguna oportunidad, sube el tablero para generar nuevos bloques.
-            this.raiseStack();
         }
     }
 
@@ -198,12 +195,12 @@ export class AI extends Board {
         return false;
     }
 
-    // La lógica de `raiseStack` se mantiene, pero la llamaremos desde `createPlan`.
+    // La IA sube su tablero cuando no encuentra movimientos.
+    // Devuelve 'gameover' si la pila llega al tope.
     raiseStack() {
         for (let x = 0; x < GRID_WIDTH; x++) {
             if (this.grid[x][0] !== null) {
-                this.hasLost = true;
-                return;
+                return 'gameover'; // La IA ha perdido.
             }
         }
 
@@ -217,7 +214,5 @@ export class AI extends Board {
             const type = Math.floor(Math.random() * BLOCK_TYPES.length);
             this.grid[x][GRID_HEIGHT - 1] = { type, state: 'idle', visualY: (GRID_HEIGHT - 1) * this.blockSize };
         }
-
-        if (this.cursor.y > 0) this.cursor.y--;
     }
 }

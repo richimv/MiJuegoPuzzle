@@ -20,9 +20,6 @@ export const BLOCK_COLORS = {
 // El índice del array corresponderá al tipo de bloque (0: RED, 1: BLUE, etc.)
 export const BLOCK_TYPES = Object.values(BLOCK_COLORS);
 
-export const GARBAGE_TYPE = 'garbage';
-export const GARBAGE_COLOR = '#A0A0A0'; // Un gris más oscuro para que destaque
-
 export const AI_THINK_TIME_EASY = 1500; // ms
 export const AI_THINK_TIME_HARD = 500; // ms
 export const AI_ACTION_PAUSE = 500; // ms

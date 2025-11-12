@@ -11,6 +11,7 @@ export class Board {
         this.grid = [];
         this.comboCount = 0;
         this.isResolving = false;
+        this.clearTimer = 0; // Temporizador para la animación de limpieza.
         this.blocksToClear = [];
         this.cursor = { x: 2, y: 5 };
 
@@ -47,28 +48,14 @@ export class Board {
 
         const performSwap = (fromX, toX, y) => {
             const movingBlock = this.grid[fromX][y];
-            this.grid[toX][y] = movingBlock;
+            // --- ¡CORRECCIÓN CLAVE! ---
+            // Creamos una copia superficial del bloque en lugar de mover la referencia.
+            // Esto evita que el mismo objeto de bloque exista en dos "estados" a la vez, previniendo condiciones de carrera en la lógica de gravedad.
+            this.grid[toX][y] = { ...movingBlock, visualY: y * this.blockSize, justMoved: true };
             this.grid[fromX][y] = null;
-
-            // --- ¡LA LÓGICA CLAVE! ---
-            // Después de mover un bloque a un espacio vacío, debemos comprobar si hay un bloque
-            // cayendo directamente hacia la columna de destino.
-            // Si es así, su nuevo "suelo" es el bloque que acabamos de mover.
-            let newFloorY = y; // El "suelo" empieza en la posición del bloque que movimos.
-            for (let checkY = y - 1; checkY >= 0; checkY--) {
-                const blockAbove = this.grid[toX][checkY];
-                if (blockAbove && blockAbove.state === 'falling') {
-                    // ¡Encontramos un bloque cayendo! Actualizamos su destino para que aterrice
-                    // sobre el nuevo "suelo" que hemos establecido.
-                    blockAbove.targetY = newFloorY - 1;
-                    // El siguiente bloque que caiga deberá aterrizar sobre este.
-                    // Así que actualizamos la posición del "suelo" para la siguiente iteración.
-                    newFloorY--;
-                } else if (blockAbove) {
-                    // Hay otro bloque quieto, así que el que cae no puede estar más arriba.
-                    break;
-                }
-            }
+            // Se ha eliminado la lógica que recalculaba `targetY` desde aquí.
+            // Ahora, `updateGravityAndFallingBlocks` es la única fuente de verdad para la física de la caída,
+            // lo que previene conflictos y condiciones de carrera.
             return true;
         };
 
@@ -123,28 +110,60 @@ export class Board {
     updateGravityAndFallingBlocks(deltaTime, audioManager) {
         let anythingFalling = false;
  
-        // FASE 1: Marcar los bloques que deben caer.
-        // Recorremos de abajo hacia arriba para una detección correcta.
+        const gridChanges = []; // Almacena los cambios de la grilla para aplicarlos al final.
+
+        // FASE 1: Determinar el targetY para todos los bloques que deben caer.
         for (let x = 0; x < GRID_WIDTH; x++) {
-            let emptySpaces = 0;
-            for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
+            // Si algún bloque en la columna acaba de moverse, pausamos la gravedad para esa columna por un ciclo.
+            // Esto previene condiciones de carrera cuando se mueven bloques muy rápido.
+            let hasJustMovedBlock = false;
+            this.grid[x].forEach(block => {
+                if (block?.justMoved) {
+                    hasJustMovedBlock = true;
+                    delete block.justMoved;
+                }
+            });
+            if (hasJustMovedBlock) continue;
+
+            const blocksInColumn = [];
+            // Recopilar todos los bloques no-null y no-clearing de la columna, preservando su Y original.
+            for (let y = 0; y < GRID_HEIGHT; y++) {
                 const block = this.grid[x][y];
-                if (block === null) {
-                    emptySpaces++;
-                } else if (emptySpaces > 0 && block.state === 'idle' && block.targetY === undefined) {
-                    // Este bloque está flotando. Marcarlo para la animación de caída.
-                    // NO lo movemos en la matriz todavía. Esto es clave.
-                    block.visualY = y * this.blockSize;
-                    block.state = 'falling';
-                    block.targetY = y + emptySpaces;
+                if (block && block.state !== 'clearing') {
+                    blocksInColumn.push({ block: block, originalY: y });
                 }
             }
+
+            // Ahora, determinar el targetY para cada bloque en su posición compactada.
+            // La lista blocksInColumn está ordenada de arriba hacia abajo (por originalY).
+            // El primer bloque (el más alto) aterrizará en Y = 0.
+            // El segundo bloque aterrizará en Y = 1, y así sucesivamente.
+            for (let i = 0; i < blocksInColumn.length; i++) {
+                const { block, originalY } = blocksInColumn[i];
+                // --- ¡CORRECCIÓN CLAVE! ---
+                // Los bloques deben compactarse en la parte inferior del tablero, no en la superior.
+                // Si hay N bloques, el primero (i=0) debe ir a (GRID_HEIGHT - N), el último a (GRID_HEIGHT - 1).
+                const calculatedTargetY = GRID_HEIGHT - blocksInColumn.length + i;
+                // Si el bloque está quieto y su posición actual en la grilla es diferente de su posición final calculada
+                // --- ¡CORRECCIÓN CLAVE! ---
+                // Solo asignamos un nuevo targetY si el bloque está 'idle'. Si ya está 'falling', confiamos en su targetY existente.
+                if (block.state === 'idle' && originalY !== calculatedTargetY) { 
+                    block.visualY = originalY * this.blockSize; // Inicia la animación desde su posición original en la grilla
+                    block.state = 'falling';
+                    block.targetY = calculatedTargetY;
+                    anythingFalling = true;
+                } else if (block.state === 'falling' && block.targetY !== calculatedTargetY) {
+                    // Si ya está cayendo pero su targetY ha cambiado (e.g., por un swap o limpieza debajo)
+                    block.targetY = calculatedTargetY;
+                    anythingFalling = true;
+                }
+            } 
         }
 
-        // FASE 2: Animar y aterrizar los bloques que están cayendo.
+        // FASE 2: Animar y registrar los aterrizajes de los bloques que están cayendo.
+        // Iterar de abajo hacia arriba para procesar los aterrizajes correctamente.
         for (let x = 0; x < GRID_WIDTH; x++) {
-            // Importante: Recorrer de arriba hacia abajo para procesar los aterrizajes correctamente.
-            for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
+            for (let y = GRID_HEIGHT - 1; y >= 0; y--) { // Iterar de abajo hacia arriba
                 const block = this.grid[x][y];
                 if (block && block.state === 'falling') {
                     anythingFalling = true;
@@ -157,20 +176,34 @@ export class Board {
                     if (block.visualY >= targetVisualY) {
                         block.visualY = targetVisualY; // Ajustar a la posición exacta.
                         block.state = 'idle';
-
-                        // --- LÓGICA DE ATERRIZAJE CORREGIDA ---
-                        // Solo realizamos el movimiento en la matriz si el bloque no está ya en su destino.
-                        // Esto es crucial. Si y === block.targetY, significa que el bloque ya está donde debe estar
-                        // (posiblemente porque otro bloque lo movió allí en el mismo fotograma).
+                        
+                        // Si el bloque se ha movido de su posición original en la grilla
                         if (y !== block.targetY) {
-                            this.grid[x][block.targetY] = block;
-                            this.grid[x][y] = null; // Borramos el bloque de su posición actual en el bucle.
+                            gridChanges.push({ x, oldY: y, newY: block.targetY, block });
+                            // --- ¡CORRECCIÓN CLAVE! ---
+                            // Eliminamos el bloque de su posición original inmediatamente para evitar que la Fase 1 del siguiente ciclo lo vuelva a procesar.
+                            this.grid[x][y] = null;
                         }
                         delete block.targetY; // Limpiar la propiedad para futuras caídas.
 
-                        if (this.isPlayer && audioManager) audioManager.play('fall');                        
+                        if (this.isPlayer && audioManager) audioManager.play('fall');
                     }
                 }
+            }
+        }
+
+        // FASE 3: Aplicar todos los cambios de la grilla de una vez.
+        // Esto evita problemas de sobrescritura durante la iteración de la Fase 2.
+        for (const change of gridChanges) {
+            // Es crucial que el destino esté vacío o sea el mismo bloque.
+            if (this.grid[change.x][change.newY] === null || this.grid[change.x][change.newY] === change.block) {
+                this.grid[change.x][change.newY] = change.block;
+                this.grid[change.x][change.oldY] = null;
+            } else {
+                console.error(`Gravity error (Phase 3): Block at (${change.x},${change.oldY}) tried to land at (${change.x},${change.newY}) but it was occupied by a different block.`);
+                // Fallback: el bloque se queda en su posición original, pero deja de caer.
+                change.block.state = 'idle';
+                change.block.visualY = change.oldY * this.blockSize;
             }
         }
 
@@ -268,5 +301,40 @@ export class Board {
             }
         }
         return null;
+    }
+
+    handleIncomingGarbage(garbageManager, audioManager) {
+        const queue = garbageManager.getPendingGarbage(this.isPlayer);
+        const holdTimer = garbageManager.getGarbageHoldTimer(this.isPlayer);
+
+        // Solo soltar basura si la cola tiene algo y el temporizador de espera ha terminado.
+        if (queue.length > 0 && holdTimer <= 0) {
+            const garbageChunk = queue.shift(); // Tomamos el paquete
+            if (!garbageChunk) return;
+
+            // Lógica de distribución que estaba en GarbageManager, ahora aquí.
+            const totalBlocks = garbageChunk.length;
+            let columns = Array.from({ length: GRID_WIDTH }, (_, i) => i);
+            // Barajar columnas para que los bloques restantes caigan en lugares aleatorios.
+            for (let i = columns.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [columns[i], columns[j]] = [columns[j], columns[i]];
+            }
+
+            for (let i = 0; i < totalBlocks; i++) {
+                const blockInfo = garbageChunk[i];
+                const columnX = columns[i % GRID_WIDTH]; // Usar módulo para filas completas
+
+                // Colocar el bloque en la parte superior de la columna.
+                // La gravedad se encargará del resto en el siguiente ciclo.
+                for (let y = 0; y < GRID_HEIGHT; y++) {
+                    if (this.grid[columnX][y] === null) {
+                        this.grid[columnX][y] = { type: blockInfo.type, state: 'falling', visualY: -this.blockSize };
+                        break;
+                    }
+                }
+            }
+            if (this.isPlayer) audioManager.play('garbage_drop');
+        }
     }
 }
