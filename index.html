@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototipo Puzzle</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Arial', sans-serif;
+        }
+        .game-container {
+            display: flex;
+            align-items: center; /* Centra los elementos verticalmente */
+            gap: 30px; /* Espacio entre la UI y el canvas */
+        }
+        #ui-container {
+            color: white;
+            width: 150px;
+            text-align: center;
+        }
+        #ui-container h2 {
+            margin: 20px 0 5px 0;
+            font-size: 1.2em;
+            color: #aaa;
+        }
+        #ui-container p {
+            font-size: 2.5em;
+            margin: 0;
+            font-weight: bold;
+            color: #fff;
+        }
+        #timer-container {
+            display: none; /* Oculto por defecto */
+        }
+        canvas {
+            background-color: #000;
+            border: 2px solid #FFF;
+        }
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 10;
+        }
+        .overlay h1 { font-size: 4em; margin-bottom: 20px; }
+        .overlay p { font-size: 1.5em; }
+        .overlay button {
+            font-size: 2em; padding: 10px 30px; cursor: pointer;
+            border: 2px solid white; background: none; color: white;
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <canvas id="aiCanvas" width="120" height="300"></canvas>
+        <div id="ui-container">
+            <h2>PUNTUACIÓN</h2>
+            <p id="score">0</p>
+            <div id="vs-cpu-ui">
+                <h2>COMBO</h2>
+                <p id="combo">x0</p>
+                <h2 style="margin-top: 40px; color: #ff4d4d;">OPONENTE</h2>
+                <p id="opponent-status" style="font-size: 1em; height: 40px;"></p>
+            </div>
+            <div id="timer-container">
+                <h2>TIEMPO</h2>
+                <p id="timer">2:00</p>
+            </div>
+        </div>
+        <canvas id="gameCanvas" width="240" height="600"></canvas>
+    </div>
+
+    <div id="menu-overlay" class="overlay">
+        <h1>Puzzle Battle</h1>
+        <button id="start-easy-button">vs CPU (Easy)</button>
+        <button id="start-hard-button">vs CPU (Hard)</button>
+        <button id="start-time-attack-button">Time Attack</button>
+    </div>
+
+    <div id="game-over-overlay" class="overlay" style="display: none;">
+        <h1 id="game-over-message"></h1>
+        <p>Final Score: <span id="final-score"></span></p>
+        <button id="play-again-button">Play Again</button>
+    </div>
+
+    <script type="module" src="main.js" defer></script>
+
+</body>
+</html>
