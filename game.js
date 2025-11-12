@@ -205,7 +205,7 @@ export class Game {
         // --- ¡NUEVO SISTEMA DE BASURA AGRESIVO! ---
         let garbageAmount = 0;
 
-        // 1. Basura por tamaño de la combinación
+        // 1. Basura por tamaño de la combinación (solo si no es parte de una cadena)
         if (comboCount <= 1) {
             if (clearedCount === 4) garbageAmount = 2;
             else if (clearedCount === 5) garbageAmount = 4;
@@ -214,7 +214,7 @@ export class Game {
 
         // 2. Basura por combos en cadena
         if (comboCount >= 2) {
-            const comboGarbage = [0, 0, 3, 5, GRID_WIDTH, GRID_WIDTH * 2];
+            const comboGarbage = [0, 0, 3, 5, GRID_WIDTH, GRID_WIDTH * 2]; // Basura por combo: 0, 0, 3, 5, 6, 12...
             garbageAmount += comboGarbage[comboCount] || (GRID_WIDTH * 3);
         }
 
@@ -235,17 +235,9 @@ export class Game {
         }
 
         if (garbageAmount > 0) {
-            const newChunk = [];
-            for (let i = 0; i < garbageAmount; i++) {
-                // El "chunk" contiene el tipo de bloque de color que caerá.
-                newChunk.push({ type: Math.floor(Math.random() * BLOCK_TYPES.length) });
-            }
+            const newChunk = Array.from({ length: garbageAmount }, () => ({ type: Math.floor(Math.random() * BLOCK_TYPES.length) }));
             targetQueue.push(newChunk);
-
-            // Reinicia el temporizador de "aguante" del objetivo.
-            const holdTimerRef = target.isPlayer ? 'playerGarbageHoldTimer' : 'aiGarbageHoldTimer';
-            this[holdTimerRef] = 2000; // 2 segundos
-
+            this[target.isPlayer ? 'playerGarbageHoldTimer' : 'aiGarbageHoldTimer'] = 2000; // 2 segundos de "aguante"
             if (target.isPlayer) this.audioManager.play('garbage_alert');
         }
     }
@@ -406,10 +398,10 @@ export class Game {
                 const gy = Math.floor(i / GRID_WIDTH);
                 context.fillRect(gx * board.blockSize, gy * board.blockSize, board.blockSize, board.blockSize); // Dibujar en la parte superior, sin offset.
             }
-            // Dibujar barra de temporizador
-            context.fillStyle = '#FF4D4D'; // Rojo para la barra
-            const timerWidth = (holdTimer / 2000) * context.canvas.width;
-            context.fillRect(0, offsetY - 5, timerWidth, 5); // Barra de 5px de alto justo encima del tablero
+                    // Dibujar barra de temporizador
+                    context.fillStyle = '#FF4D4D'; // Rojo para la barra
+                    const timerWidth = (holdTimer / 2000) * context.canvas.width;
+                    context.fillRect(0, offsetY - 5, timerWidth, 5); // Barra de 5px de alto justo encima del tablero
+                }
+            }
         }
-    }
-}
