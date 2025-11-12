@@ -48,14 +48,8 @@ export class Board {
 
         const performSwap = (fromX, toX, y) => {
             const movingBlock = this.grid[fromX][y];
-            // --- ¡CORRECCIÓN CLAVE! ---
-            // Creamos una copia superficial del bloque en lugar de mover la referencia.
-            // Esto evita que el mismo objeto de bloque exista en dos "estados" a la vez, previniendo condiciones de carrera en la lógica de gravedad.
-            this.grid[toX][y] = { ...movingBlock, visualY: y * this.blockSize, justMoved: true };
+            this.grid[toX][y] = { ...movingBlock, visualY: y * this.blockSize }; // Copia con visualY correcto
             this.grid[fromX][y] = null;
-            // Se ha eliminado la lógica que recalculaba `targetY` desde aquí.
-            // Ahora, `updateGravityAndFallingBlocks` es la única fuente de verdad para la física de la caída,
-            // lo que previene conflictos y condiciones de carrera.
             return true;
         };
 
@@ -69,13 +63,31 @@ export class Board {
 
         // Caso 1: Intercambio de un bloque quieto (block1) a un espacio vacío (a la derecha).
         // Esta es la condición clave que permite deslizar bloques bajo otros que caen.
-        if (block1?.state === 'idle' && block2 === null) {
+        if (block1?.state === 'idle' && !block2) {
+            // --- ¡TU PROPUESTA RADICAL IMPLEMENTADA! ---
+            // Validamos que la coordenada de destino no esté "visualmente" ocupada por un bloque en caída.
+            const targetVisualY = y * this.blockSize;
+            for (let checkY = 0; checkY < GRID_HEIGHT; checkY++) {
+                const fallingBlock = this.grid[x + 1][checkY];
+                if (fallingBlock?.state === 'falling' && Math.abs(fallingBlock.visualY - targetVisualY) < this.blockSize) {
+                    return false; // ¡Coordenada ocupada! Movimiento bloqueado.
+                }
+            }
             return performSwap(x, x + 1, y);
         }
+
         // Caso 2: Intercambio de un bloque quieto (block2) a un espacio vacío (a la izquierda).
-        if (block2?.state === 'idle' && block1 === null) {
+        if (block2?.state === 'idle' && !block1) {
+            const targetVisualY = y * this.blockSize;
+            for (let checkY = 0; checkY < GRID_HEIGHT; checkY++) {
+                const fallingBlock = this.grid[x][checkY];
+                if (fallingBlock?.state === 'falling' && Math.abs(fallingBlock.visualY - targetVisualY) < this.blockSize) {
+                    return false; // ¡Coordenada ocupada! Movimiento bloqueado.
+                }
+            }
             return performSwap(x + 1, x, y);
         }
+
         // Caso 3: Intercambio entre dos bloques quietos.
         if (block1?.state === 'idle' && block2?.state === 'idle') {
             [this.grid[x][y], this.grid[x + 1][y]] = [block2, block1]; // Swap simple
@@ -114,17 +126,6 @@ export class Board {
 
         // FASE 1: Determinar el targetY para todos los bloques que deben caer.
         for (let x = 0; x < GRID_WIDTH; x++) {
-            // Si algún bloque en la columna acaba de moverse, pausamos la gravedad para esa columna por un ciclo.
-            // Esto previene condiciones de carrera cuando se mueven bloques muy rápido.
-            let hasJustMovedBlock = false;
-            this.grid[x].forEach(block => {
-                if (block?.justMoved) {
-                    hasJustMovedBlock = true;
-                    delete block.justMoved;
-                }
-            });
-            if (hasJustMovedBlock) continue;
-
             const blocksInColumn = [];
             // Recopilar todos los bloques no-null y no-clearing de la columna, preservando su Y original.
             for (let y = 0; y < GRID_HEIGHT; y++) {
@@ -144,19 +145,7 @@ export class Board {
                 // Los bloques deben compactarse en la parte inferior del tablero, no en la superior.
                 // Si hay N bloques, el primero (i=0) debe ir a (GRID_HEIGHT - N), el último a (GRID_HEIGHT - 1).
                 const calculatedTargetY = GRID_HEIGHT - blocksInColumn.length + i;
-                // Si el bloque está quieto y su posición actual en la grilla es diferente de su posición final calculada
-                // --- ¡CORRECCIÓN CLAVE! ---
-                // Solo asignamos un nuevo targetY si el bloque está 'idle'. Si ya está 'falling', confiamos en su targetY existente.
-                if (block.state === 'idle' && originalY !== calculatedTargetY) { 
-                    block.visualY = originalY * this.blockSize; // Inicia la animación desde su posición original en la grilla
-                    block.state = 'falling';
-                    block.targetY = calculatedTargetY;
-                    anythingFalling = true;
-                } else if (block.state === 'falling' && block.targetY !== calculatedTargetY) {
-                    // Si ya está cayendo pero su targetY ha cambiado (e.g., por un swap o limpieza debajo)
-                    block.targetY = calculatedTargetY;
-                    anythingFalling = true;
-                }
+                if (block.targetY !== calculatedTargetY) block.targetY = calculatedTargetY;
             } 
         }
 
@@ -165,11 +154,17 @@ export class Board {
         for (let x = 0; x < GRID_WIDTH; x++) {
             for (let y = GRID_HEIGHT - 1; y >= 0; y--) { // Iterar de abajo hacia arriba
                 const block = this.grid[x][y];
-                if (block && block.state === 'falling') {
-                    anythingFalling = true;
-                    const targetVisualY = block.targetY * this.blockSize;
+                if (block) {
+                    // Iniciar caída si es necesario
+                    if (block.state === 'idle' && y !== block.targetY) {
+                        block.state = 'falling';
+                        // --- GRAVEDAD CONSISTENTE ---
+                        block.visualY = y * this.blockSize; // Inicia la animación desde la posición lógica actual.
+                    }
 
-                    // Mover visualmente el bloque.
+                    if (block.state === 'falling') {
+                    anythingFalling = true;
+                    const targetVisualY = block.targetY * this.blockSize;                    // Mover visualmente el bloque.
                     block.visualY += FALL_SPEED * (deltaTime / 1000);
 
                     // Comprobar si ha aterrizado.
@@ -181,12 +176,12 @@ export class Board {
                         if (y !== block.targetY) {
                             gridChanges.push({ x, oldY: y, newY: block.targetY, block });
                             // --- ¡CORRECCIÓN CLAVE! ---
-                            // Eliminamos el bloque de su posición original inmediatamente para evitar que la Fase 1 del siguiente ciclo lo vuelva a procesar.
                             this.grid[x][y] = null;
                         }
                         delete block.targetY; // Limpiar la propiedad para futuras caídas.
 
                         if (this.isPlayer && audioManager) audioManager.play('fall');
+                    }
                     }
                 }
             }
@@ -198,7 +193,10 @@ export class Board {
             // Es crucial que el destino esté vacío o sea el mismo bloque.
             if (this.grid[change.x][change.newY] === null || this.grid[change.x][change.newY] === change.block) {
                 this.grid[change.x][change.newY] = change.block;
-                this.grid[change.x][change.oldY] = null;
+                // Solo borramos el antiguo si no ha sido ocupado por otro cambio.
+                if (this.grid[change.x][change.oldY] === change.block) {
+                    this.grid[change.x][change.oldY] = null;
+                }
             } else {
                 console.error(`Gravity error (Phase 3): Block at (${change.x},${change.oldY}) tried to land at (${change.x},${change.newY}) but it was occupied by a different block.`);
                 // Fallback: el bloque se queda en su posición original, pero deja de caer.

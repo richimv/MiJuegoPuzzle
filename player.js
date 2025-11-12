@@ -16,14 +16,7 @@ export class Player extends Board {
             case 'ArrowRight': if (this.cursor.x < GRID_WIDTH - 2) this.cursor.x++; break;
             case 'ArrowUp': if (this.cursor.y > 0) this.cursor.y--; break;
             case 'ArrowDown': if (this.cursor.y < GRID_HEIGHT - 1) this.cursor.y++; break;
-            case ' ': 
-                // No permitir intercambiar si los bloques bajo el cursor están desapareciendo.
-                const block1 = this.grid[this.cursor.x]?.[this.cursor.y];
-                const block2 = this.grid[this.cursor.x + 1]?.[this.cursor.y];
-                if (block1?.state === 'clearing' || block2?.state === 'clearing') {
-                    break;
-                }
-
+            case ' ':
                 if (this.swapBlocks(this.cursor.x, this.cursor.y)) {
                     audioManager.play('swap');
                 }
@@ -33,9 +26,7 @@ export class Player extends Board {
     }
 
     handleKeyUp(key) {
-        if (key === 'Shift') {
-            this.isManualRaising = false;
-        }
+        if (key === 'Shift') this.isManualRaising = false;
     }
 
     updateRaise(deltaTime, canRaise) {

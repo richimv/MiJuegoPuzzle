@@ -16,11 +16,14 @@ export class AI extends Board {
         this.isExecutingPlan = false;
     }
 
-    update(deltaTime, isAnythingFalling) {
-        if (this.isResolving || isAnythingFalling) {
+    // La IA ahora usa el mismo método `update` que el tablero base.
+    update(deltaTime, garbageManager, audioManager) {
+        super.update(deltaTime, garbageManager, audioManager);
+
+        const isBoardStable = !this.isResolving && !this.grid.flat().some(b => b?.state === 'falling');
+
+        if (!isBoardStable) {
             this.actionTimer = this.reactionTime;
-            this.plan = []; // Si el tablero cambia, el plan antiguo es inválido.
-            this.isExecutingPlan = false;
             return;
         }
 
@@ -28,15 +31,14 @@ export class AI extends Board {
         if (this.actionTimer > 0) return;
 
         this.actionTimer = this.reactionTime;
-
-        // Si ya tiene un plan, lo ejecuta.
-        if (this.isExecutingPlan) {
-            this.executeNextStep();
-            return;
+        
+        // La IA solo piensa y actúa si el tablero está estable.
+        if (this.actionQueue.length === 0) {
+            this.createPlan();
         }
 
-        // Si no tiene plan, crea uno.
-        this.createPlan();
+        // Si no hay plan y el tablero está estable, sube la pila.
+        if (this.actionQueue.length === 0) this.raiseStack();
     }
 
     createPlan() {
@@ -52,13 +54,12 @@ export class AI extends Board {
             const direction = Math.sign(targetPos.x - blockPos.x);
 
             while (currentX !== targetPos.x) {
-                const swapX = direction > 0 ? currentX : currentX - 1;
-                this.plan.push({ action: 'swap', x: swapX, y: blockPos.y });
+                this.actionQueue.push({ type: 'MOVE_CURSOR', x: currentX, y: blockPos.y });
+                this.actionQueue.push({ type: 'SWAP' });
                 currentX += direction;
             }
-
-            // El último paso es el swap final que crea la combinación.
-            this.plan.push({ action: 'swap', x: targetPos.x, y: targetPos.y });
+            this.actionQueue.push({ type: 'MOVE_CURSOR', x: targetPos.x, y: targetPos.y });
+            this.actionQueue.push({ type: 'SWAP' });
 
             this.isExecutingPlan = true;
             this.executeNextStep(); // Ejecutar el primer paso inmediatamente.
@@ -71,10 +72,13 @@ export class AI extends Board {
             return;
         }
 
-        const step = this.plan.shift();
-        this.cursor.x = step.x;
-        this.cursor.y = step.y;
-        this.swapBlocks(step.x, step.y);
+        const step = this.actionQueue.shift(); // Ahora usamos la cola de acciones del tablero
+        if (step.type === 'MOVE_CURSOR') {
+            this.cursor.x = step.x;
+            this.cursor.y = step.y;
+        } else if (step.type === 'SWAP') {
+            this.swapBlocks(this.cursor.x, this.cursor.y);
+        }
     }
 
     findBestOpportunity() {
