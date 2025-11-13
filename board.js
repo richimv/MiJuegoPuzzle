@@ -57,7 +57,14 @@ export class Board {
 
         // En simulación, el intercambio siempre es posible para la IA.
         if (isSimulation) {
-            [this.grid[x][y], this.grid[x + 1][y]] = [block2, block1];
+            // Añadimos una guarda para prevenir errores si la IA intenta un swap fuera de los límites.
+            if (x < 0 || x + 1 >= GRID_WIDTH) {
+                return false;
+            }
+            // Asegurarse de que los bloques existan antes de intercambiarlos.
+            if (block1 && block2) {
+                [this.grid[x][y], this.grid[x + 1][y]] = [block2, block1];
+            }
             return true;
         }
 
@@ -121,87 +128,49 @@ export class Board {
      */
     updateGravityAndFallingBlocks(deltaTime, audioManager) {
         let anythingFalling = false;
- 
-        const gridChanges = []; // Almacena los cambios de la grilla para aplicarlos al final.
 
-        // FASE 1: Determinar el targetY para todos los bloques que deben caer.
-        for (let x = 0; x < GRID_WIDTH; x++) {
-            const blocksInColumn = [];
-            // Recopilar todos los bloques no-null y no-clearing de la columna, preservando su Y original.
-            for (let y = 0; y < GRID_HEIGHT; y++) {
+        // PASE 1: Detección de Caída
+        // Identificamos todos los bloques que deberían empezar a caer.
+        for (let y = GRID_HEIGHT - 2; y >= 0; y--) {
+            for (let x = 0; x < GRID_WIDTH; x++) {
                 const block = this.grid[x][y];
-                if (block && block.state !== 'clearing') {
-                    blocksInColumn.push({ block: block, originalY: y });
+                if (!block || block.state === 'clearing') continue;
+
+                // Si el bloque está quieto y la casilla de abajo está vacía, empieza a caer.
+                if (block.state === 'idle' && this.grid[x][y + 1] === null) {
+                    block.state = 'falling';
                 }
             }
-
-            // Ahora, determinar el targetY para cada bloque en su posición compactada.
-            // La lista blocksInColumn está ordenada de arriba hacia abajo (por originalY).
-            // El primer bloque (el más alto) aterrizará en Y = 0.
-            // El segundo bloque aterrizará en Y = 1, y así sucesivamente.
-            for (let i = 0; i < blocksInColumn.length; i++) {
-                const { block, originalY } = blocksInColumn[i];
-                // --- ¡CORRECCIÓN CLAVE! ---
-                // Los bloques deben compactarse en la parte inferior del tablero, no en la superior.
-                // Si hay N bloques, el primero (i=0) debe ir a (GRID_HEIGHT - N), el último a (GRID_HEIGHT - 1).
-                const calculatedTargetY = GRID_HEIGHT - blocksInColumn.length + i;
-                if (block.targetY !== calculatedTargetY) block.targetY = calculatedTargetY;
-            } 
         }
 
-        // FASE 2: Animar y registrar los aterrizajes de los bloques que están cayendo.
-        // Iterar de abajo hacia arriba para procesar los aterrizajes correctamente.
-        for (let x = 0; x < GRID_WIDTH; x++) {
-            for (let y = GRID_HEIGHT - 1; y >= 0; y--) { // Iterar de abajo hacia arriba
+        // PASE 2: Animación y Aterrizaje
+        // Ahora animamos y aterrizamos todos los bloques marcados como 'falling'.
+        for (let y = GRID_HEIGHT - 2; y >= 0; y--) {
+            for (let x = 0; x < GRID_WIDTH; x++) {
                 const block = this.grid[x][y];
-                if (block) {
-                    // Iniciar caída si es necesario
-                    if (block.state === 'idle' && y !== block.targetY) {
-                        block.state = 'falling';
-                        // --- GRAVEDAD CONSISTENTE ---
-                        block.visualY = y * this.blockSize; // Inicia la animación desde la posición lógica actual.
-                    }
+                if (!block || block.state !== 'falling') continue;
 
-                    if (block.state === 'falling') {
-                    anythingFalling = true;
-                    const targetVisualY = block.targetY * this.blockSize;                    // Mover visualmente el bloque.
-                    block.visualY += FALL_SPEED * (deltaTime / 1000);
+                anythingFalling = true;
+                const targetVisualY = (y + 1) * this.blockSize;
 
-                    // Comprobar si ha aterrizado.
-                    if (block.visualY >= targetVisualY) {
-                        block.visualY = targetVisualY; // Ajustar a la posición exacta.
+                // Mover visualmente el bloque.
+                block.visualY += FALL_SPEED * (deltaTime / 1000);
+
+                // Comprobar si ha aterrizado.
+                if (block.visualY >= targetVisualY) {
+                    // Mover el bloque en la matriz.
+                    if (this.grid[x][y + 1] === null) {
+                        this.grid[x][y + 1] = block;
+                        this.grid[x][y] = null;
                         block.state = 'idle';
-                        
-                        // Si el bloque se ha movido de su posición original en la grilla
-                        if (y !== block.targetY) {
-                            gridChanges.push({ x, oldY: y, newY: block.targetY, block });
-                            // --- ¡CORRECCIÓN CLAVE! ---
-                            this.grid[x][y] = null;
-                        }
-                        delete block.targetY; // Limpiar la propiedad para futuras caídas.
-
+                        block.visualY = targetVisualY;
                         if (this.isPlayer && audioManager) audioManager.play('fall');
-                    }
+                    } else {
+                        // La casilla de destino se ocupó mientras caía. Detenerse donde está.
+                        block.state = 'idle';
+                        block.visualY = y * this.blockSize;
                     }
                 }
-            }
-        }
-
-        // FASE 3: Aplicar todos los cambios de la grilla de una vez.
-        // Esto evita problemas de sobrescritura durante la iteración de la Fase 2.
-        for (const change of gridChanges) {
-            // Es crucial que el destino esté vacío o sea el mismo bloque.
-            if (this.grid[change.x][change.newY] === null || this.grid[change.x][change.newY] === change.block) {
-                this.grid[change.x][change.newY] = change.block;
-                // Solo borramos el antiguo si no ha sido ocupado por otro cambio.
-                if (this.grid[change.x][change.oldY] === change.block) {
-                    this.grid[change.x][change.oldY] = null;
-                }
-            } else {
-                console.error(`Gravity error (Phase 3): Block at (${change.x},${change.oldY}) tried to land at (${change.x},${change.newY}) but it was occupied by a different block.`);
-                // Fallback: el bloque se queda en su posición original, pero deja de caer.
-                change.block.state = 'idle';
-                change.block.visualY = change.oldY * this.blockSize;
             }
         }
 
@@ -216,8 +185,8 @@ export class Board {
         for (let y = 0; y < GRID_HEIGHT; y++) {
             for (let x = 0; x < GRID_WIDTH - 2; ) {
                 const b1 = this.grid[x][y];
-                // Un bloque puede ser parte de una combinación si está quieto o cayendo.
-                const canCheck = b1 && (isInitialCheck || b1.state === 'idle') && b1.state !== 'clearing';
+                // --- CORRECCIÓN CLAVE --- Un bloque solo puede hacer match si está quieto ('idle').
+                const canCheck = b1 && b1.state === 'idle';
                 if (canCheck) {
                     let matchLength = 1;
                     while (x + matchLength < GRID_WIDTH &&
@@ -239,8 +208,8 @@ export class Board {
         for (let x = 0; x < GRID_WIDTH; x++) {
             for (let y = 0; y < GRID_HEIGHT - 2; ) {
                 const b1 = this.grid[x][y];
-                // Un bloque puede ser parte de una combinación si está quieto o cayendo.
-                const canCheck = b1 && (isInitialCheck || b1.state === 'idle') && b1.state !== 'clearing';
+                // --- CORRECCIÓN CLAVE --- Un bloque solo puede hacer match si está quieto ('idle').
+                const canCheck = b1 && b1.state === 'idle';
                 if (canCheck) {
                     let matchLength = 1;
                     while (y + matchLength < GRID_HEIGHT &&
@@ -323,16 +292,36 @@ export class Board {
                 const blockInfo = garbageChunk[i];
                 const columnX = columns[i % GRID_WIDTH]; // Usar módulo para filas completas
 
-                // Colocar el bloque en la parte superior de la columna.
-                // La gravedad se encargará del resto en el siguiente ciclo.
+                // --- ¡NUEVA LÓGICA DE COLOCACIÓN SEGURA! ---
+                // Encontrar la posición más alta ocupada en la columna para determinar el "suelo".
+                let groundY = -1;
                 for (let y = 0; y < GRID_HEIGHT; y++) {
-                    if (this.grid[columnX][y] === null) {
-                        this.grid[columnX][y] = { type: blockInfo.type, state: 'falling', visualY: -this.blockSize };
-                        break;
+                    if (this.grid[columnX][y] !== null) {
+                        groundY = y;
+                        break; // Encontramos el bloque más alto, no necesitamos seguir buscando.
                     }
+                }
+
+                // Colocar el nuevo bloque de basura justo encima del "suelo".
+                const landingY = groundY === -1 ? GRID_HEIGHT -1 : groundY - 1;
+                if (landingY >= 0) { // Asegurarse de que haya espacio en la columna.
+                    this.grid[columnX][landingY] = { type: blockInfo.type, state: 'idle', visualY: -this.blockSize };
                 }
             }
             if (this.isPlayer) audioManager.play('garbage_drop');
+        }
+    }
+
+    updateRaise(deltaTime, canRaise) {
+        if (canRaise) {
+            const speed = this.isManualRaising ? MANUAL_RAISE_SPEED : (this.blockSize / (this.currentRaiseInterval / 1000));
+            this.raiseProgress += speed * (deltaTime / 1000);
+        }
+
+        if (this.raiseProgress >= this.blockSize) {
+            const result = this.raiseStack();
+            this.raiseProgress -= this.blockSize;
+            return result;
         }
     }
 }

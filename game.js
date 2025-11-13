@@ -83,9 +83,6 @@ export class Game {
         this.updateBoard(this.player, deltaTime);
         if (this.ai) this.updateBoard(this.ai, deltaTime);
 
-        // --- Actualización del Gestor de Basura ---
-        this.garbageManager.updateWaveController();
-
         // --- Actualización del Temporizador (si aplica) ---
         if (this.gameMode === 'TIME_ATTACK') {
             this.timer -= deltaTime;
@@ -110,6 +107,12 @@ export class Game {
 
         const isAnythingFalling = board.updateGravityAndFallingBlocks(deltaTime, this.audioManager);
 
+        // Si un combo ha terminado (no hay más limpiezas pero el contador es > 0), enviar la basura.
+        if (board.comboCount > 0 && board.handleMatches() === 0 && !isAnythingFalling) {
+            this.garbageManager.sendAccumulatedGarbage(board);
+            board.comboCount = 0;
+        }
+
         if (!isAnythingFalling) {
             const clearedCount = board.handleMatches();
             if (clearedCount > 0) {
@@ -120,17 +123,12 @@ export class Game {
                 if (board.isPlayer) {
                     this.player.score += clearedCount * 10 * board.comboCount;
                     if (this.gameMode === 'VS_CPU') {
-                        // this.garbageManager.accumulateGarbage(this.player, clearedCount, board.comboCount);
+                        this.garbageManager.accumulateGarbage(this.player, clearedCount, board.comboCount);
                     }
                 } else {
-                    // this.garbageManager.accumulateGarbage(this.ai, clearedCount, board.comboCount);
+                    this.garbageManager.accumulateGarbage(this.ai, clearedCount, board.comboCount);
                 }
                 return;
-            }
-
-            if (board.comboCount > 0) {
-                // this.garbageManager.sendAccumulatedGarbage(board);
-                board.comboCount = 0;
             }
 
             board.handleIncomingGarbage(this.garbageManager, this.audioManager);
@@ -140,7 +138,7 @@ export class Game {
                     this.gameOver('AI');
                 }
             } else {
-                // Lógica de la IA
+                board.update(deltaTime); // Llamamos al método update de la IA.
             }
         }
     }
@@ -212,7 +210,7 @@ export class Game {
         context.stroke();
 
         // Dibujar cursor
-        if (board.cursor && board.isPlayer) {
+        if (board.cursor) {
             context.strokeStyle = CURSOR_COLOR;
             context.lineWidth = 2;
             context.strokeRect(board.cursor.x * board.blockSize, board.cursor.y * board.blockSize + offsetY, board.blockSize * 2, board.blockSize);

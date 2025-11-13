@@ -14,12 +14,14 @@ export class AI extends Board {
         // --- El "Cerebro" de la IA ---
         this.plan = []; // Una secuencia de acciones a realizar. Ej: [{action: 'move', x: 1, y: 5}, {action: 'swap', x: 1, y: 5}]
         this.isExecutingPlan = false;
+        // Lógica de subida de tablero, igual que el jugador.
+        this.isManualRaising = false;
+        this.raiseProgress = 0;
+        this.currentRaiseInterval = 5000; // La IA sube a un ritmo constante
     }
 
     // La IA ahora usa el mismo método `update` que el tablero base.
-    update(deltaTime, garbageManager, audioManager) {
-        super.update(deltaTime, garbageManager, audioManager);
-
+    update(deltaTime) {
         const isBoardStable = !this.isResolving && !this.grid.flat().some(b => b?.state === 'falling');
 
         if (!isBoardStable) {
@@ -33,12 +35,18 @@ export class AI extends Board {
         this.actionTimer = this.reactionTime;
         
         // La IA solo piensa y actúa si el tablero está estable.
-        if (this.actionQueue.length === 0) {
+        if (this.isExecutingPlan) {
+            this.executeNextStep();
+        } else if (isBoardStable) { 
+            // Solo crea un nuevo plan si no está ejecutando uno Y el tablero está estable.
             this.createPlan();
         }
 
-        // Si no hay plan y el tablero está estable, sube la pila.
-        if (this.actionQueue.length === 0) this.raiseStack();
+        // La IA ahora sube su tablero a un ritmo constante, como el jugador.
+        if (!this.isExecutingPlan && isBoardStable) {
+            // La IA no tiene basura pendiente, por lo que siempre puede subir.
+            if (this.updateRaise(deltaTime, true) === 'gameover') return 'gameover';
+        }
     }
 
     createPlan() {
@@ -49,18 +57,17 @@ export class AI extends Board {
             // 2. Si encuentra una, crea la secuencia de movimientos (el plan).
             const { blockPos, targetPos } = opportunity;
 
-            // Generar la ruta de swaps para mover el bloque.
-            let currentX = blockPos.x;
-            const direction = Math.sign(targetPos.x - blockPos.x);
-
-            while (currentX !== targetPos.x) {
-                this.actionQueue.push({ type: 'MOVE_CURSOR', x: currentX, y: blockPos.y });
-                this.actionQueue.push({ type: 'SWAP' });
-                currentX += direction;
+            // Si es un simple swap adyacente
+            if (blockPos.x === targetPos.x && blockPos.y === targetPos.y) {
+                this.plan.push({ action: 'move_cursor', x: blockPos.x, y: blockPos.y });
+                this.plan.push({ action: 'swap' });
+            } else {
+                // Lógica para movimientos más complejos (no implementada aún)
+                // Por ahora, solo hacemos el swap simple.
+                this.plan.push({ action: 'move_cursor', x: blockPos.x, y: blockPos.y });
+                this.plan.push({ action: 'swap' });
             }
-            this.actionQueue.push({ type: 'MOVE_CURSOR', x: targetPos.x, y: targetPos.y });
-            this.actionQueue.push({ type: 'SWAP' });
-
+            
             this.isExecutingPlan = true;
             this.executeNextStep(); // Ejecutar el primer paso inmediatamente.
         }
@@ -72,76 +79,57 @@ export class AI extends Board {
             return;
         }
 
-        const step = this.actionQueue.shift(); // Ahora usamos la cola de acciones del tablero
-        if (step.type === 'MOVE_CURSOR') {
+        const step = this.plan.shift();
+        if (step.action === 'move_cursor') {
             this.cursor.x = step.x;
             this.cursor.y = step.y;
-        } else if (step.type === 'SWAP') {
-            this.swapBlocks(this.cursor.x, this.cursor.y);
+        } else if (step.action === 'swap') {
+            this.swapBlocks(this.cursor.x, this.cursor.y, true); // La IA simula el swap
         }
     }
 
     findBestOpportunity() {
         let bestOpportunity = null;
+        let bestScore = -1;
 
-        // Recorrer cada bloque del tablero.
-        for (let y = 0; y < GRID_HEIGHT; y++) {
-            for (let x = 0; x < GRID_WIDTH; x++) {
-                const block = this.grid[x][y];
-                // La IA ahora puede considerar mover bloques que están quietos ('idle').
-                if (!block || block.state !== 'idle') continue;
-
-                // Para este bloque, ¿cuál es el mejor lugar para moverlo?
-                // Comprobaremos si al moverlo a otra columna se crea una combinación.
-                for (let targetX = 0; targetX < GRID_WIDTH; targetX++) {
-                    if (targetX === x) continue; // No tiene sentido moverlo a su misma columna.
-
-                    // ¿Es posible moverlo? (¿hay un camino libre?)
-                    if (!this.isPathClear(x, targetX, y)) continue;
-
-                    // Simular el estado del tablero si moviéramos el bloque.
-                    const tempGrid = this.grid.map(col => col.slice());
-                    const movedBlock = tempGrid[x][y];
-                    tempGrid[x][y] = null; // Dejamos un hueco
-
-                    // Simular la caída del bloque en la nueva columna.
-                    let targetY = y;
-                    while (targetY + 1 < GRID_HEIGHT && tempGrid[targetX][targetY + 1] === null) {
-                        targetY++;
-                    }
-                    tempGrid[targetX][targetY] = movedBlock;
-
-                    // Ahora, con este tablero simulado, ¿se crea una combinación?
-                    if (this.checkForMatchInGrid(tempGrid, targetX, targetY)) {
-                        // ¡Oportunidad encontrada!
-                        // Por ahora, nos quedamos con la primera que encontremos.
-                        // Una IA más avanzada podría evaluar la "calidad" de la oportunidad.
-                        return {
-                            blockPos: { x, y },
-                            targetPos: { x: targetX, y: y } // El objetivo es la columna, la fila es la misma para el swap inicial.
-                        };
-                    }
-                }
-            }
-        }
-
-        // Si no se encontró ninguna oportunidad de movimiento complejo, buscar un simple swap adyacente.
+        // La IA ahora se centra en encontrar el mejor SWAP adyacente.
+        // La lógica de movimiento complejo era defectuosa y causaba la parálisis.
         for (let y = 0; y < GRID_HEIGHT; y++) {
             for (let x = 0; x < GRID_WIDTH - 1; x++) {
+                // Solo considerar swaps con bloques que existen y están quietos.
+                const b1 = this.grid[x][y];
+                const b2 = this.grid[x+1][y];
+                if (!b1 || !b2 || b1.state !== 'idle' || b2.state !== 'idle') {
+                    continue;
+                }
+
+                // Simular el swap
                 this.swapBlocks(x, y, true);
-                // Ahora la IA también comprueba si el swap crea una combinación con bloques que caen.
-                const createsMatch = this.checkForMatchAt(x, y, true) || this.checkForMatchAt(x + 1, y, true);
-                this.swapBlocks(x, y, true); // Deshacer
-                if (createsMatch) {
-                    return {
+                
+                // Evaluar la calidad de la jugada
+                const score = this.evaluateBoardState();
+
+                // Deshacer el swap
+                this.swapBlocks(x, y, true); 
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestOpportunity = {
                         blockPos: { x, y },
-                        targetPos: { x, y } // El objetivo es la misma posición, solo se hace un swap.
+                        targetPos: { x, y } // El objetivo es la misma posición para un swap simple.
                     };
                 }
             }
         }
 
         return bestOpportunity;
+    }
+
+    evaluateBoardState() {
+        // Esta es una función de evaluación simple. Una IA más avanzada tendría una lógica más compleja.
+        // Por ahora, solo cuenta el número de bloques que harían match.
+        const { clearingBlocks } = this.findMatchesInCurrentState();
+        return clearingBlocks.length;
     }
 
     isPathClear(startX, endX, y) {
@@ -153,6 +141,44 @@ export class AI extends Board {
             }
         }
         return true;
+    }
+
+    findMatchesInCurrentState() {
+        const matchGrid = Array(GRID_WIDTH).fill(null).map(() => Array(GRID_HEIGHT).fill(false));
+        let clearingBlocks = [];
+
+        // Horizontal
+        for (let y = 0; y < GRID_HEIGHT; y++) {
+            for (let x = 0; x < GRID_WIDTH - 2; x++) {
+                const b1 = this.grid[x][y];
+                if (b1 && this.grid[x+1]?.[y]?.type === b1.type && this.grid[x+2]?.[y]?.type === b1.type) {
+                    matchGrid[x][y] = true;
+                    matchGrid[x+1][y] = true;
+                    matchGrid[x+2][y] = true;
+                }
+            }
+        }
+
+        // Vertical
+        for (let x = 0; x < GRID_WIDTH; x++) {
+            for (let y = 0; y < GRID_HEIGHT - 2; y++) {
+                const b1 = this.grid[x][y];
+                if (b1 && this.grid[x]?.[y+1]?.type === b1.type && this.grid[x]?.[y+2]?.type === b1.type) {
+                    matchGrid[x][y] = true;
+                    matchGrid[x][y+1] = true;
+                    matchGrid[x][y+2] = true;
+                }
+            }
+        }
+
+        for (let y = 0; y < GRID_HEIGHT; y++) {
+            for (let x = 0; x < GRID_WIDTH; x++) {
+                if (matchGrid[x][y]) {
+                    clearingBlocks.push(this.grid[x][y]);
+                }
+            }
+        }
+        return { clearingBlocks, matchGrid };
     }
 
     checkForMatchInGrid(grid, x, y) {
@@ -197,6 +223,19 @@ export class AI extends Board {
         if (vCount >= 3) return true;
 
         return false;
+    }
+    
+    updateRaise(deltaTime, canRaise) {
+        if (canRaise) {
+            const speed = (this.blockSize / (this.currentRaiseInterval / 1000));
+            this.raiseProgress += speed * (deltaTime / 1000);
+        }
+
+        if (this.raiseProgress >= this.blockSize) {
+            const result = this.raiseStack();
+            this.raiseProgress -= this.blockSize;
+            return result;
+        }
     }
 
     // La IA sube su tablero cuando no encuentra movimientos.

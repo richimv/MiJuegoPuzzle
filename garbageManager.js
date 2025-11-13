@@ -6,8 +6,6 @@ export class GarbageManager {
         this.audioManager = audioManager;
         this.screenShakeManager = screenShakeManager;
 
-        this.playerAttackToSend = 0;
-        this.aiAttackToSend = 0;
         this.playerPendingAttack = 0;
         this.aiPendingAttack = 0;
         this.playerPendingGarbage = [];
@@ -19,8 +17,6 @@ export class GarbageManager {
     }
 
     reset() {
-        this.playerAttackToSend = 0;
-        this.aiAttackToSend = 0;
         this.playerPendingAttack = 0;
         this.aiPendingAttack = 0;
         this.playerPendingGarbage = [];
@@ -72,36 +68,14 @@ export class GarbageManager {
         this[isPlayerSender ? 'playerPendingAttack' : 'aiPendingAttack'] = 0; // El ataque se ha consumido
         this[isPlayerSender ? 'aiPendingAttack' : 'playerPendingAttack'] = opponentAttack; // Actualizar el ataque del oponente
 
-        // En lugar de enviar todo, lo almacenamos para que el controlador de oleadas lo gestione.
+        // Si queda basura por enviar, se crea un único paquete y se añade a la cola del oponente.
         if (attackAmount > 0) {
-            if (isPlayerSender) {
-                this.aiAttackToSend += attackAmount; // El jugador envía, la IA recibe.
-            } else {
-                this.playerAttackToSend += attackAmount; // La IA envía, el jugador recibe.
-            }
-        }
-    }
-
-    // Este nuevo método gestiona el envío de basura en oleadas.
-    updateWaveController() {
-        // Gestionar oleadas para el jugador
-        if (this.playerAttackToSend > 0 && this.playerPendingGarbage.length === 0) {
-            const chunkSize = Math.min(this.playerAttackToSend, GRID_WIDTH);
-            this.playerAttackToSend -= chunkSize;
-            const newChunk = Array.from({ length: chunkSize }, () => ({ type: Math.floor(Math.random() * BLOCK_TYPES.length) }));
-            this.playerPendingGarbage.push(newChunk);
-            this.playerGarbageHoldTimer = 2000;
-            this.audioManager.play('garbage_alert');
-        }
-
-        // Gestionar oleadas para la IA
-        if (this.aiAttackToSend > 0 && this.aiPendingGarbage.length === 0) {
-            const chunkSize = Math.min(this.aiAttackToSend, GRID_WIDTH);
-            this.aiAttackToSend -= chunkSize;
-            const newChunk = Array.from({ length: chunkSize }, () => ({ type: Math.floor(Math.random() * BLOCK_TYPES.length) }));
-            this.aiPendingGarbage.push(newChunk);
-            this.aiGarbageHoldTimer = 2000;
-            // No reproducimos sonido para la IA para no confundir al jugador.
+            const targetBoard = isPlayerSender ? { isPlayer: false } : { isPlayer: true };
+            const targetQueue = targetBoard.isPlayer ? this.playerPendingGarbage : this.aiPendingGarbage;
+            const newChunk = Array.from({ length: attackAmount }, () => ({ type: Math.floor(Math.random() * BLOCK_TYPES.length) }));
+            targetQueue.push(newChunk);
+            this[targetBoard.isPlayer ? 'playerGarbageHoldTimer' : 'aiGarbageHoldTimer'] = 2000;
+            if (targetBoard.isPlayer) this.audioManager.play('garbage_alert');
         }
     }
 
